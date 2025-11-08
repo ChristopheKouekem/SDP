@@ -11,7 +11,7 @@ using UnityEngine.UI;
 public class Buttons : MonoBehaviour
 {
     [Header("API")]
-    public string api = "https://192.168.198.129:1880/kursform/";
+    public string api = "http://192.168.198.129:1880/kursform/";
     [Header("Table Prefab")]
     public GameObject tablePrefab;
     public GameObject editMenu;
@@ -60,10 +60,10 @@ public class Buttons : MonoBehaviour
         if (addB != null)
             addB.onClick.AddListener(() => AddMenu());
 
-        Vector3 offset = Vector3.zero;
+        Vector3 offset = new Vector3(0, 120, 0);
         foreach (var kur in latestKursForm)
         {
-            GameObject gO = Instantiate(tablePrefab, activeMenu.transform);
+            GameObject gO = Instantiate(tablePrefab, activeMenu.transform.position + offset, Quaternion.identity, activeMenu.transform);
             gO.name = kur.kfnr.ToString();
 
             TMP_Text[] textComponents = gO.GetComponentsInChildren<TMP_Text>();
@@ -83,7 +83,7 @@ public class Buttons : MonoBehaviour
                 else if (b.name == "Delete")
                     b.onClick.AddListener(() => DeleteAction());
             }
-            offset.y += 10;
+            offset.y -= 80;
         }
     }
 
@@ -103,13 +103,21 @@ public class Buttons : MonoBehaviour
 
     public void EditMenu()
     {
-        GameObject clickedButton = EventSystem.current.currentSelectedGameObject.GetComponentInParent<Transform>().gameObject;
-        int name = int.Parse(clickedButton.name);
+        GameObject clickedButton = EventSystem.current.currentSelectedGameObject;
+        GameObject parent = clickedButton.transform.parent.gameObject;
+        if (!int.TryParse(parent.name, out int name))
+        {
+            Debug.LogWarning($"Button-Name '{parent.name}' ist keine Zahl!");
+            return;
+        }
 
         Destroy(activeMenu);
         activeMenu = Instantiate(editMenu);
 
         activeKurs = latestKursForm.Find(x => x.kfnr == name);
+
+        Button button = activeMenu.GetComponentInChildren<Button>();
+        button.onClick.AddListener(() => Change());
 
         TMP_InputField[] textComponents = activeMenu.GetComponentsInChildren<TMP_InputField>();
         foreach (var text in textComponents)
@@ -220,15 +228,7 @@ public class Buttons : MonoBehaviour
 
             try
             {
-                KursFormList kursFormList = JsonUtility.FromJson<KursFormList>(lastResponseJson);
-                if (kursFormList != null && kursFormList.kursformen != null)
-                {
-                    latestKursForm = kursFormList.kursformen;
-                }
-                else
-                {
-                    Debug.LogWarning("Deserialisierung ergab null. Prüfe JSON-Struktur oder KursFormList-Klasse.");
-                }
+                latestKursForm = JsonHelper.FromJson<KursForm>(lastResponseJson);
             }
             catch (Exception e)
             {
@@ -262,5 +262,21 @@ public class Buttons : MonoBehaviour
     public class KursFormList
     {
         public List<KursForm> kursformen;
+    }
+
+    public static class JsonHelper
+    {
+        public static List<T> FromJson<T>(string json)
+        {
+            string wrapped = "{\"Items\":" + json + "}";
+            Wrapper<T> wrapper = JsonUtility.FromJson<Wrapper<T>>(wrapped);
+            return wrapper.Items;
+        }
+
+        [Serializable]
+        private class Wrapper<T>
+        {
+            public List<T> Items;
+        }
     }
 }
