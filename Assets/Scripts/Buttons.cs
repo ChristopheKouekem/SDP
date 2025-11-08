@@ -92,8 +92,14 @@ public class Buttons : MonoBehaviour
         Destroy(activeMenu);
         activeMenu = Instantiate(addMenu);
 
-        Button button = activeMenu.GetComponentInChildren<Button>();
-        button.onClick.AddListener(() => Add());
+        Button[] b = activeMenu.GetComponentsInChildren<Button>();
+        foreach (var button in b)
+        {
+            if (button.name == "Add")
+                button.onClick.AddListener(() => Add());
+            else if (button.name == "Back")
+                button.onClick.AddListener(() => ShowMenu());
+        }
     }
 
     public void Add()
@@ -116,8 +122,14 @@ public class Buttons : MonoBehaviour
 
         activeKurs = latestKursForm.Find(x => x.kfnr == name);
 
-        Button button = activeMenu.GetComponentInChildren<Button>();
-        button.onClick.AddListener(() => Change());
+        Button[] b = activeMenu.GetComponentsInChildren<Button>();
+        foreach (var button in b)
+        {
+            if (button.name == "Edit")
+                button.onClick.AddListener(() => Change());
+            else if (button.name == "Back")
+                button.onClick.AddListener(() => ShowMenu());
+        }
 
         TMP_InputField[] textComponents = activeMenu.GetComponentsInChildren<TMP_InputField>();
         foreach (var text in textComponents)
@@ -142,9 +154,10 @@ public class Buttons : MonoBehaviour
         KursForm updated = new KursForm(newkf.ToString(), bz);
         string jsonData = JsonUtility.ToJson(updated);
 
-        var url = api + "edit/";
+        var url = api + "edit"; // Node-RED Endpoint
         using (UnityWebRequest uwr = new UnityWebRequest(url, "POST"))
         {
+            uwr.timeout = 10;
             byte[] jsonToSend = new System.Text.UTF8Encoding().GetBytes(jsonData);
             uwr.uploadHandler = new UploadHandlerRaw(jsonToSend);
             uwr.downloadHandler = new DownloadHandlerBuffer();
@@ -162,11 +175,12 @@ public class Buttons : MonoBehaviour
 
     public IEnumerator Delete(KursForm kursForm)
     {
-        var url = api + "delete/";
         string jsonData = JsonUtility.ToJson(kursForm);
+        var url = api + "delete"; // Node-RED Endpoint
 
         using (UnityWebRequest uwr = new UnityWebRequest(url, "POST"))
         {
+            uwr.timeout = 10;
             byte[] jsonToSend = new System.Text.UTF8Encoding().GetBytes(jsonData);
             uwr.uploadHandler = new UploadHandlerRaw(jsonToSend);
             uwr.downloadHandler = new DownloadHandlerBuffer();
@@ -190,9 +204,10 @@ public class Buttons : MonoBehaviour
         KursForm kursForm = new KursForm(kf, bz);
         string jsonData = JsonUtility.ToJson(kursForm);
 
-        var url = api + "add/";
+        var url = api + "add"; // Node-RED Endpoint
         using (UnityWebRequest uwr = new UnityWebRequest(url, "POST"))
         {
+            uwr.timeout = 10;
             byte[] jsonToSend = new System.Text.UTF8Encoding().GetBytes(jsonData);
             uwr.uploadHandler = new UploadHandlerRaw(jsonToSend);
             uwr.downloadHandler = new DownloadHandlerBuffer();
@@ -210,7 +225,7 @@ public class Buttons : MonoBehaviour
 
     private IEnumerator FetchKursForm()
     {
-        var url = api;
+        var url = api; // Node-RED GET Endpoint
         using (UnityWebRequest uwr = UnityWebRequest.Get(url))
         {
             uwr.timeout = 10;
