@@ -21,7 +21,7 @@ public class Buttons : MonoBehaviour
 
     private string lastResponseJson;
     private List<KursForm> latestKursForm = new();
-    KursForm activeKurs;
+    private KursForm activeKurs;
 
     private void Awake()
     {
@@ -34,14 +34,103 @@ public class Buttons : MonoBehaviour
         ShowMenu();
     }
 
-    public void DeleteAction()
-    {
-        GameObject clickedButton = EventSystem.current.currentSelectedGameObject.GetComponentInParent<Transform>().gameObject;
-        int name = int.Parse(clickedButton.name);
+    // -----------------------------------------------
+    // CRUD-AKTIONEN
+    // -----------------------------------------------
 
-        activeKurs = latestKursForm.Find(x => x.kfnr == name);
-        StartCoroutine(Delete(activeKurs));
-        StartCoroutine(Refresh());
+    public IEnumerator FetchKursForm()
+    {
+        using (UnityWebRequest uwr = UnityWebRequest.Get(api))
+        {
+            uwr.timeout = 10;
+            uwr.certificateHandler = new BypassCertificate();
+
+            yield return uwr.SendWebRequest();
+            if (uwr.result != UnityWebRequest.Result.Success)
+            {
+                Debug.LogWarning($"API-Request fehlgeschlagen: {uwr.error}");
+                yield break;
+            }
+
+            lastResponseJson = uwr.downloadHandler.text;
+            Debug.Log("API-Antwort empfangen: " + lastResponseJson);
+
+            try
+            {
+                latestKursForm = JsonHelper.FromJson<KursForm>(lastResponseJson);
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning("Fehler beim Deserialisieren: " + e);
+            }
+        }
+    }
+
+    public IEnumerator AddNew()
+    {
+        string bz = GameObject.Find("bzEingabe").GetComponent<TMP_InputField>().text;
+
+        // Node-RED erwartet: [{"bezeichnung": "..."}]
+        string jsonData = "[{\"bezeichnung\":\"" + bz + "\"}]";
+
+        using (UnityWebRequest uwr = new UnityWebRequest(api, "POST"))
+        {
+            uwr.timeout = 10;
+            uwr.uploadHandler = new UploadHandlerRaw(System.Text.Encoding.UTF8.GetBytes(jsonData));
+            uwr.downloadHandler = new DownloadHandlerBuffer();
+            uwr.SetRequestHeader("Content-Type", "application/json");
+            uwr.certificateHandler = new BypassCertificate();
+
+            yield return uwr.SendWebRequest();
+
+            if (uwr.result != UnityWebRequest.Result.Success)
+                Debug.LogWarning($"POST fehlgeschlagen: {uwr.error}");
+        }
+
+        yield return Refresh();
+    }
+
+    public IEnumerator Edit(KursForm kursForm)
+    {
+        string bz = GameObject.Find("bzEingabe").GetComponent<TMP_InputField>().text;
+        string jsonData = "[{\"bezeichnung\":\"" + bz + "\"}]";
+
+        string url = api + kursForm.kfnr;
+
+        using (UnityWebRequest uwr = new UnityWebRequest(url, "PATCH"))
+        {
+            uwr.timeout = 10;
+            uwr.uploadHandler = new UploadHandlerRaw(System.Text.Encoding.UTF8.GetBytes(jsonData));
+            uwr.downloadHandler = new DownloadHandlerBuffer();
+            uwr.SetRequestHeader("Content-Type", "application/json");
+            uwr.certificateHandler = new BypassCertificate();
+
+            yield return uwr.SendWebRequest();
+
+            if (uwr.result != UnityWebRequest.Result.Success)
+                Debug.LogWarning($"PATCH fehlgeschlagen: {uwr.error}");
+        }
+
+        yield return Refresh();
+    }
+
+    public IEnumerator Delete(KursForm kursForm)
+    {
+        string url = api + kursForm.kfnr;
+
+        using (UnityWebRequest uwr = UnityWebRequest.Delete(url))
+        {
+            uwr.timeout = 10;
+            uwr.downloadHandler = new DownloadHandlerBuffer();
+            uwr.certificateHandler = new BypassCertificate();
+
+            yield return uwr.SendWebRequest();
+
+            if (uwr.result != UnityWebRequest.Result.Success)
+                Debug.LogWarning($"DELETE fehlgeschlagen: {uwr.error}");
+        }
+
+        yield return Refresh();
     }
 
     public IEnumerator Refresh()
@@ -49,6 +138,10 @@ public class Buttons : MonoBehaviour
         yield return StartCoroutine(FetchKursForm());
         ShowMenu();
     }
+
+    // -----------------------------------------------
+    // UI-Logik
+    // -----------------------------------------------
 
     public void ShowMenu()
     {
@@ -102,16 +195,11 @@ public class Buttons : MonoBehaviour
         }
     }
 
-    public void Add()
-    {
-        StartCoroutine(AddNew());
-    }
-
     public void EditMenu()
     {
         GameObject clickedButton = EventSystem.current.currentSelectedGameObject;
         GameObject parent = clickedButton.transform.parent.gameObject;
-        if (!int.TryParse(parent.name, out int name))
+        if (!int.TryParse(parent.name, out int id))
         {
             Debug.LogWarning($"Button-Name '{parent.name}' ist keine Zahl!");
             return;
@@ -120,7 +208,7 @@ public class Buttons : MonoBehaviour
         Destroy(activeMenu);
         activeMenu = Instantiate(editMenu);
 
-        activeKurs = latestKursForm.Find(x => x.kfnr == name);
+        activeKurs = latestKursForm.Find(x => x.kfnr == id);
 
         Button[] b = activeMenu.GetComponentsInChildren<Button>();
         foreach (var button in b)
@@ -131,133 +219,40 @@ public class Buttons : MonoBehaviour
                 button.onClick.AddListener(() => ShowMenu());
         }
 
-        TMP_InputField[] textComponents = activeMenu.GetComponentsInChildren<TMP_InputField>();
-        foreach (var text in textComponents)
+        TMP_InputField textComponents = activeMenu.GetComponentInChildren<TMP_InputField>();
+        TMP_Text[] textF = activeMenu.GetComponentsInChildren<TMP_Text>();
+        foreach (var t in textF)
         {
-            if (text.gameObject.name == "kfnrEingabe")
-                text.text = activeKurs.kfnr.ToString();
-            else if (text.gameObject.name == "bzEingabe")
-                text.text = activeKurs.bezeichnung.ToString();
+            if (t.gameObject.name == "kfnrEingabe")
+                t.text = activeKurs.kfnr.ToString();
         }
+        if (textComponents.gameObject.name == "bzEingabe")
+            textComponents.text = activeKurs.bezeichnung.ToString();
     }
 
-    public void Change()
+    public void Add() => StartCoroutine(AddNew());
+    public void Change() => StartCoroutine(Edit(activeKurs));
+
+    public void DeleteAction()
     {
-        StartCoroutine(Edit(activeKurs));
-    }
-
-    public IEnumerator Edit(KursForm kursForm)
-    {
-        int newkf = Convert.ToInt32(GameObject.Find("kfnrEingabe").GetComponent<TMP_InputField>().text);
-        string bz = GameObject.Find("bzEingabe").GetComponent<TMP_InputField>().text;
-
-        KursForm updated = new KursForm(newkf.ToString(), bz);
-        string jsonData = JsonUtility.ToJson(updated);
-
-        var url = api + "edit"; // Node-RED Endpoint
-        using (UnityWebRequest uwr = new UnityWebRequest(url, "POST"))
+        GameObject clickedButton = EventSystem.current.currentSelectedGameObject;
+        GameObject parent = clickedButton.transform.parent.gameObject;
+        if (!int.TryParse(parent.name, out int id))
         {
-            uwr.timeout = 10;
-            byte[] jsonToSend = new System.Text.UTF8Encoding().GetBytes(jsonData);
-            uwr.uploadHandler = new UploadHandlerRaw(jsonToSend);
-            uwr.downloadHandler = new DownloadHandlerBuffer();
-            uwr.SetRequestHeader("Content-Type", "application/json");
-            uwr.certificateHandler = new BypassCertificate();
-
-            yield return uwr.SendWebRequest();
-
-            if (uwr.result != UnityWebRequest.Result.Success)
-                Debug.LogWarning($"API-Request fehlgeschlagen: {uwr.error}");
+            Debug.LogWarning($"Button-Name '{parent.name}' ist keine Zahl!");
+            return;
         }
-
-        yield return Refresh();
+        activeKurs = latestKursForm.Find(x => x.kfnr == id);
+        StartCoroutine(Delete(activeKurs));
     }
 
-    public IEnumerator Delete(KursForm kursForm)
-    {
-        string jsonData = JsonUtility.ToJson(kursForm);
-        var url = api + "delete"; // Node-RED Endpoint
-
-        using (UnityWebRequest uwr = new UnityWebRequest(url, "POST"))
-        {
-            uwr.timeout = 10;
-            byte[] jsonToSend = new System.Text.UTF8Encoding().GetBytes(jsonData);
-            uwr.uploadHandler = new UploadHandlerRaw(jsonToSend);
-            uwr.downloadHandler = new DownloadHandlerBuffer();
-            uwr.SetRequestHeader("Content-Type", "application/json");
-            uwr.certificateHandler = new BypassCertificate();
-
-            yield return uwr.SendWebRequest();
-
-            if (uwr.result != UnityWebRequest.Result.Success)
-                Debug.LogWarning($"API-Request fehlgeschlagen: {uwr.error}");
-        }
-
-        yield return Refresh();
-    }
-
-    public IEnumerator AddNew()
-    {
-        string kf = GameObject.Find("kfnrEingabe").GetComponent<TMP_InputField>().text;
-        string bz = GameObject.Find("bzEingabe").GetComponent<TMP_InputField>().text;
-
-        KursForm kursForm = new KursForm(kf, bz);
-        string jsonData = JsonUtility.ToJson(kursForm);
-
-        var url = api + "add"; // Node-RED Endpoint
-        using (UnityWebRequest uwr = new UnityWebRequest(url, "POST"))
-        {
-            uwr.timeout = 10;
-            byte[] jsonToSend = new System.Text.UTF8Encoding().GetBytes(jsonData);
-            uwr.uploadHandler = new UploadHandlerRaw(jsonToSend);
-            uwr.downloadHandler = new DownloadHandlerBuffer();
-            uwr.SetRequestHeader("Content-Type", "application/json");
-            uwr.certificateHandler = new BypassCertificate();
-
-            yield return uwr.SendWebRequest();
-
-            if (uwr.result != UnityWebRequest.Result.Success)
-                Debug.LogWarning($"API-Request fehlgeschlagen: {uwr.error}");
-        }
-
-        yield return Refresh();
-    }
-
-    private IEnumerator FetchKursForm()
-    {
-        var url = api; // Node-RED GET Endpoint
-        using (UnityWebRequest uwr = UnityWebRequest.Get(url))
-        {
-            uwr.timeout = 10;
-            uwr.certificateHandler = new BypassCertificate();
-
-            yield return uwr.SendWebRequest();
-            if (uwr.result != UnityWebRequest.Result.Success)
-            {
-                Debug.LogWarning($"API-Request fehlgeschlagen: {uwr.error}");
-                yield break;
-            }
-
-            lastResponseJson = uwr.downloadHandler.text;
-            Debug.Log("API-Antwort empfangen: " + lastResponseJson);
-
-            try
-            {
-                latestKursForm = JsonHelper.FromJson<KursForm>(lastResponseJson);
-            }
-            catch (Exception e)
-            {
-                Debug.LogWarning("Fehler beim Deserialisieren: " + e);
-            }
-        }
-    }
+    // -----------------------------------------------
+    // Hilfsklassen
+    // -----------------------------------------------
 
     private class BypassCertificate : CertificateHandler
     {
-        protected override bool ValidateCertificate(byte[] certificateData)
-        {
-            return true;
-        }
+        protected override bool ValidateCertificate(byte[] certificateData) => true;
     }
 
     [Serializable]
@@ -265,18 +260,6 @@ public class Buttons : MonoBehaviour
     {
         public int kfnr;
         public string bezeichnung;
-
-        public KursForm(string kf, string bz)
-        {
-            kfnr = Convert.ToInt32(kf);
-            bezeichnung = bz;
-        }
-    }
-
-    [Serializable]
-    public class KursFormList
-    {
-        public List<KursForm> kursformen;
     }
 
     public static class JsonHelper
